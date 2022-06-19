@@ -150,13 +150,17 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  the amount of data can sometimes become overwhelming and the 
  *  indicator app may freeze. Increasing this number will extend 
  *  the amount of time between messages sent from the Arduino to 
- *  the phone. Every 10th of a second (100ms) should be a good
- *  compromise between sending too much data and keeping the data
- *  as close to live as possible.
+ *  the phone (note, you must also change a corresponding value in
+ *  the Android app). 
+ *  
+ *  Every 150ms should be a good compromise between 
+ *  sending too much data and keeping the data as close to live as 
+ *  possible. I also added a smoothing algorythm below that averages the
+ *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 25; 
-float listOfReadings[5];
-
+unsigned long messageSendInterval         = 150; 
+float smoothReadings = 0.0;
+int smoothReadingsCount = 0;
 
 /*** Prepare the LED Pin and set it to LOW (off) ***/
 const int ledPin = 2; // 8; // LED_BUILTIN; //8;
@@ -175,7 +179,8 @@ int ledState = LOW;
   LED on or off or possibly reset the "lastTimerReading" variable to a new value.
   
   There is a very lengthy discussion on what an "unsigned long" variable is below. Read
-  it if you are interested.
+  it if you are interested. Look for a section that says Signed vs. Unsigned Longs around 
+  line 330 of this file 
 ****************************************************/
 
 unsigned long lastBlinkTimerMillis;
@@ -324,7 +329,8 @@ void loop() {
     /** light up the LED when a connection is made **/
     digitalWrite(ledPin, HIGH);
     
-    /** 
+    /** Signed vs. Unsigned Longs
+     *  
      * Next, we'll figure out how many milliseconds it's been since the Arduino was powered on using the "millis()" function below
      * and put that value in an "unsigned long" variable. 
      * 
@@ -340,7 +346,7 @@ void loop() {
      * which) is used as the "sign" for positive or negative. So the decimal number -1 would translate into 00000000 00000000 00000000 00000001 in 
      * binary (where the first bit (0) in the list means it's negative number and the other 31 bits are the numeric value). 
      * 
-     * A positive 1 might translate into 10000000 00000000 00000000 00000001, for example - again, where the very first bit (1) denotes a positve number.
+     * A positive 1 might translate into 10000000 00000000 00000000 00000001, for example; this time, where the very first bit (1) denotes a positve number.
      *
      * However:
      * Since we're using an "unsigned" long, the first bit is actually part of an always-positive number rather than being wasted as a -/+ sign 
@@ -444,9 +450,14 @@ void loop() {
         float pitchAngle = rawAnglePitch;
 
         if (timerMillis - lastMessageTimerMillis < messageSendInterval) {
-          // addNewReadingForAverage(rawAnglePitch);
-          // possibly add code to smooth out data (rounding??) 
+          // smooth out data (rounding??) 
+          smoothReadings += pitchAngle;
+          smoothReadingsCount++;
+          
         } else {
+
+          pitchAngle = smoothReadings / smoothReadingsCount;
+          
           /* reset the last readings with the current ones */
           lastAnglePitch = pitchAngle;
           lastTurnRate = turnRate;
@@ -462,6 +473,9 @@ void loop() {
           SERIAL.print('\t');
           SERIAL.println(turnRate);
           lastMessageTimerMillis = timerMillis;
+
+          smoothReadings = 0.0;
+          smoothReadingsCount = 0;
           
         }
       }
