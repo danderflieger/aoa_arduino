@@ -158,9 +158,13 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  possible. I also added a smoothing algorythm below that averages the
  *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 150; 
+unsigned long messageSendInterval         = 100; 
 float smoothReadings = 0.0;
+float smoothTurnRate = 0.0;
 int smoothReadingsCount = 0;
+
+
+
 
 /*** Prepare the LED Pin and set it to LOW (off) ***/
 const int ledPin = 2; // 8; // LED_BUILTIN; //8;
@@ -452,11 +456,13 @@ void loop() {
         if (timerMillis - lastMessageTimerMillis < messageSendInterval) {
           // smooth out data (rounding??) 
           smoothReadings += pitchAngle;
+          smoothTurnRate += turnRate;
           smoothReadingsCount++;
           
         } else {
 
           pitchAngle = smoothReadings / smoothReadingsCount;
+          turnRate = smoothTurnRate / smoothReadingsCount;
           
           /* reset the last readings with the current ones */
           lastAnglePitch = pitchAngle;
@@ -475,6 +481,7 @@ void loop() {
           lastMessageTimerMillis = timerMillis;
 
           smoothReadings = 0.0;
+          smoothTurnRate = 0.0;
           smoothReadingsCount = 0;
           
         }
