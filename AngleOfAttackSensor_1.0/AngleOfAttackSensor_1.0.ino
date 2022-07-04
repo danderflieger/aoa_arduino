@@ -135,6 +135,7 @@ AMS_5600 ams5600;
 // waste cycles retransmitting something it has already transmitted
 float lastAnglePitch  = 0.0; 
 float lastTurnRate = 0.0;
+float lastSlipSkid = 0.0;
 
 
 // set time intervals for blinking light signals (e.g. there is an LED mounted
@@ -158,9 +159,11 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  possible. I also added a smoothing algorythm below that averages the
  *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 100; 
+unsigned long messageSendInterval         = 300; 
+
 float smoothReadings = 0.0;
 float smoothTurnRate = 0.0;
+float smoothSlipSkidReading = 0.0;
 int smoothReadingsCount = 0;
 
 
@@ -206,8 +209,12 @@ unsigned int lastMessageTimerMillis;
 * Characteristics I decide to add.
 **/
 BLEService             angleService           ("00000001-627E-47E5-A3FC-DDABD97AA966");
+//BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
 BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
-BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead );
+BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead );
 
 
 /*********************************** 
@@ -296,13 +303,14 @@ void setup() {
   
   angleService.addCharacteristic(angleCharacteristic);
   angleService.addCharacteristic(turnRateCharacteristic);
+  angleService.addCharacteristic(slipSkidCharacteristic);
   //angleService.addCharacteristic(messageCharacteristic);
   BLE.setAdvertisedService(angleService);
   BLE.addService(angleService);
 
  /** Start advertising the Bluetooth service(s) **/
   BLE.advertise();  
-  delay(1000); /** give the Bluetooth hardware a second to start up **/
+  delay(1200); /** give the Bluetooth hardware a second to start up **/
   
   /** display that something is happening on the Serial monitor **/
   Serial.print("Peripheral device MAC: "); Serial.println(BLE.address());
@@ -322,8 +330,8 @@ void loop() {
   /** Create a new BLEDevice object (named "central" here) **/
   BLEDevice central = BLE.central();
 
-  /** As long as "central" starts up correctly (basically, is your Android device connected to
-   * the Arduino via Bluetooth?), start doing stuff 
+  /** As long as "central" starts up correctly (basically, is your Android device is connected to
+   * the Arduino via Bluetooth), start doing stuff 
   **/
   if (central) {
 
@@ -437,10 +445,14 @@ void loop() {
         AoA sensor with the windvane at close to level flight when read at the AS5600).
       */
       float rawAnglePitch = convertRawAngleToDegrees(ams5600.getRawAngle()) - 180;
-      float x, y, z;
-      IMU.readGyroscope(x, y, z);
-      float turnRate = z;
+      float gX, gY, gZ, aX, aY, aZ;
       
+      
+      IMU.readGyroscope(gX, gY, gZ);
+      float turnRate = gZ;
+
+      IMU.readAcceleration(aX, aY, aZ);
+      float slipSkid = aY;
 
       /* 
         Check to see if the current value is the same as it was the last time through.
@@ -449,39 +461,52 @@ void loop() {
         instead.
       */
       
-      if (rawAnglePitch != lastAnglePitch || turnRate != lastTurnRate) {
+      if (rawAnglePitch != lastAnglePitch) { // || turnRate != lastTurnRate || slipSkid != lastSlipSkid) {
         /* if so, push the update out over the Bluetooth connection */
         float pitchAngle = rawAnglePitch;
 
         if (timerMillis - lastMessageTimerMillis < messageSendInterval) {
-          // smooth out data (rounding??) 
+          // Keep tally of the readings and the number of times the code has run
+          // since the last readings were sent. 
           smoothReadings += pitchAngle;
           smoothTurnRate += turnRate;
+          smoothSlipSkidReading += slipSkid;
           smoothReadingsCount++;
           
         } else {
 
+          // Once we reach our send threshold, average the values using the 
+          // tally for each divided by the number of times the code ran since 
+          // the last message was sent
           pitchAngle = smoothReadings / smoothReadingsCount;
           turnRate = smoothTurnRate / smoothReadingsCount;
+          slipSkid = smoothSlipSkidReading / smoothReadingsCount;
           
           /* reset the last readings with the current ones */
           lastAnglePitch = pitchAngle;
           lastTurnRate = turnRate;
+          lastSlipSkid = slipSkid;
+          
 
           /* update the Bluetooth Characteristic - any devices subscribed to the Characteristic
              should see their data updated since we configured it to BLENotify */
-          turnRateCharacteristic.setValue(turnRate);
-          angleCharacteristic.setValue(pitchAngle);
+          turnRateCharacteristic  .setValue(turnRate);
+          angleCharacteristic     .setValue(pitchAngle);
+          slipSkidCharacteristic  .setValue(slipSkid);
           
   
           /* write the data out to the Serial line to view for debugging. */
           SERIAL.print(pitchAngle);
           SERIAL.print('\t');
-          SERIAL.println(turnRate);
-          lastMessageTimerMillis = timerMillis;
+          SERIAL.print(turnRate);
+          SERIAL.print('\t');
+          SERIAL.println(slipSkid);
 
+          // reset the counters in preparation for the next message to be sent
+          lastMessageTimerMillis = timerMillis;
           smoothReadings = 0.0;
           smoothTurnRate = 0.0;
+          smoothSlipSkidReading = 0.0;
           smoothReadingsCount = 0;
           
         }
@@ -517,51 +542,6 @@ void loop() {
 
 }
 
-/*****************************************************************
-  Function: getReadingAverage()
-  In: N/A
-  Out: an average of the last 5 readings
-   calculates the 
-  average of all 5 elements, returns the average value
- *****************************************************************/
-// float getReadingAverage() {
-
-//   float average;
-  
-//   for (int i=0; i<5; i++) {
-//     average += listOfReadings[i];
-//   }
-  
-//   average = average/(int)sizeof(listOfReadings);
-  
-//   return average;
-  
-// }
-
-/*****************************************************************
- Function: addNewReadingForAverage(float newReading)
- In: the latest reading from the AS5600 
- Out: N/A
- Description: Receives a float value, moves all current elements
-  of the listOfReadings float array to the left by one element, 
-  adds the new value to the end of the array,
-******************************************************************/
-// void addNewReadingForAverage(float newReading) {
-//   String output = "listOfReadings{";
-//   for (int i=0; i<4; i++) {
-//     listOfReadings[i] = listOfReadings[i+1];
-//     output += listOfReadings[i];
-//     output += ", ";
-//   }
-  
-//   listOfReadings[4] = newReading;
-//   output += listOfReadings[4];
-//   SERIAL.print(output);SERIAL.println("}");
-//   SERIAL.println(getReadingAverage());
-//   delay(25);
-  
-// }
-
 /********************************************************************
   Function: convertRawAngleToDegrees
   In: angle data from AMS_5600 - an integer between 0 and 4095
@@ -594,7 +574,7 @@ float convertRawAngleToDegrees(word newAngle) {
   you ask for the sensor's reading. The multiplexer will stay connected
   to the device until you ask it to connect to another one of its many 
   device interfaces. From your perspective, though, you only ever call
-  the operator to 
+  the operator to re-route the call
 *********************************************************************/
 void changeMuxPort(uint8_t bus) {
   /* remember that the Multiplexer needs to have its A0 jumper soldered
