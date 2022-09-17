@@ -159,7 +159,7 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  possible. I also added a smoothing algorythm below that averages the
  *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 300; 
+unsigned long messageSendInterval         = 250; 
 
 float smoothReadings = 0.0;
 float smoothTurnRate = 0.0;
@@ -212,10 +212,11 @@ BLEService             angleService           ("00000001-627E-47E5-A3FC-DDABD97A
 //BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
 //BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
 //BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
-BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
-BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead );
-BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead );
+//BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
 
+BLEStringCharacteristic readingCharacteristic ( "00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify , 50);
 
 /*********************************** 
   This is where the work begins. Arduinos have two required functions - setup() and loop(). setup() runs
@@ -301,10 +302,12 @@ void setup() {
   //  BLE.addService(messageService);
   //  messageCharacteristic.setValue("Connection Established");
   
-  angleService.addCharacteristic(angleCharacteristic);
-  angleService.addCharacteristic(turnRateCharacteristic);
-  angleService.addCharacteristic(slipSkidCharacteristic);
+  //angleService.addCharacteristic(angleCharacteristic);
+  //angleService.addCharacteristic(turnRateCharacteristic);
+  //angleService.addCharacteristic(slipSkidCharacteristic);
   //angleService.addCharacteristic(messageCharacteristic);
+
+  angleService.addCharacteristic(readingCharacteristic);
   BLE.setAdvertisedService(angleService);
   BLE.addService(angleService);
 
@@ -461,7 +464,7 @@ void loop() {
         instead.
       */
       
-      if (rawAnglePitch != lastAnglePitch) { // || turnRate != lastTurnRate || slipSkid != lastSlipSkid) {
+      //if (rawAnglePitch != lastAnglePitch) { // || turnRate != lastTurnRate || slipSkid != lastSlipSkid) {
         /* if so, push the update out over the Bluetooth connection */
         float pitchAngle = rawAnglePitch;
 
@@ -490,17 +493,35 @@ void loop() {
 
           /* update the Bluetooth Characteristic - any devices subscribed to the Characteristic
              should see their data updated since we configured it to BLENotify */
-          turnRateCharacteristic  .setValue(turnRate);
-          angleCharacteristic     .setValue(pitchAngle);
-          slipSkidCharacteristic  .setValue(slipSkid);
+//          SERIAL.print( turnRateCharacteristic  .setValue(turnRate) );
+//          SERIAL.print( angleCharacteristic     .setValue(pitchAngle) );
+//          SERIAL.println( slipSkidCharacteristic  .setValue(slipSkid) );
+
+          String readings = String(pitchAngle) + "," + String(turnRate) + "," + String(slipSkid);
+          SERIAL.println(readings);
+          readingCharacteristic.setValue(readings);
+          //char readingBytes [readings.length()+1];
+          //readings.toCharArray(readingBytes);
+//          readings.toCharArray(readingBytes, readings.length());
+//          readingCharacteristic.setValue(readingBytes);
+
+          //SERIAL.println (readingBytes);
+          
+  
+          //SERIAL.println( readingCharacteristic .setValue(readingCharacteristic));
+
+
+//          String output = String(pitchAngle) + String(",") + String(turnRate) + String(",") + String(slipSkid);
+//
+//          SERIAL.println(output);
           
   
           /* write the data out to the Serial line to view for debugging. */
-          SERIAL.print(pitchAngle);
-          SERIAL.print('\t');
-          SERIAL.print(turnRate);
-          SERIAL.print('\t');
-          SERIAL.println(slipSkid);
+//          SERIAL.print(pitchAngle);
+//          SERIAL.print(',);
+//          SERIAL.print(turnRate);
+//          SERIAL.print(',');
+//          SERIAL.println(slipSkid);
 
           // reset the counters in preparation for the next message to be sent
           lastMessageTimerMillis = timerMillis;
@@ -510,7 +531,7 @@ void loop() {
           smoothReadingsCount = 0;
           
         }
-      }
+      //}
     }
 
     /* 
