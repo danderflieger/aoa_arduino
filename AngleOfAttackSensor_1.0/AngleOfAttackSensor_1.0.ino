@@ -115,6 +115,7 @@
 #include <ArduinoBLE.h> // library for utilizing Bluetooth Low Energy 
 #include <Wire.h>       // library required for I2C communications
 #include <AS5600.h>     // library for the AS5600 magnetic rotational encoder
+#include <Arduino_LSM6DS3.h>
 
 
 /** 
@@ -133,6 +134,8 @@ AMS_5600 ams5600;
 // defining a keep a copy of the last readings so the arduino doesn't 
 // waste cycles retransmitting something it has already transmitted
 float lastAnglePitch  = 0.0; 
+float lastTurnRate = 0.0;
+float lastSlipSkid = 0.0;
 
 
 // set time intervals for blinking light signals (e.g. there is an LED mounted
@@ -148,12 +151,22 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  the amount of data can sometimes become overwhelming and the 
  *  indicator app may freeze. Increasing this number will extend 
  *  the amount of time between messages sent from the Arduino to 
- *  the phone. Every 10th of a second (100ms) should be a good
- *  compromise between sending too much data and keeping the data
- *  as close to live as possible.
+ *  the phone (note, you must also change a corresponding value in
+ *  the Android app). 
+ *  
+ *  Every 150ms should be a good compromise between 
+ *  sending too much data and keeping the data as close to live as 
+ *  possible. I also added a smoothing algorythm below that averages the
+ *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 25; 
-float listOfReadings[5];
+unsigned long messageSendInterval         = 250; 
+
+float smoothReadings = 0.0;
+float smoothTurnRate = 0.0;
+float smoothSlipSkidReading = 0.0;
+int smoothReadingsCount = 0;
+
+
 
 
 /*** Prepare the LED Pin and set it to LOW (off) ***/
@@ -173,7 +186,8 @@ int ledState = LOW;
   LED on or off or possibly reset the "lastTimerReading" variable to a new value.
   
   There is a very lengthy discussion on what an "unsigned long" variable is below. Read
-  it if you are interested.
+  it if you are interested. Look for a section that says Signed vs. Unsigned Longs around 
+  line 330 of this file 
 ****************************************************/
 
 unsigned long lastBlinkTimerMillis;
@@ -194,9 +208,15 @@ unsigned int lastMessageTimerMillis;
 * barometric data, temperature data, etc.), they will likely be 00000003 through whatever number of other
 * Characteristics I decide to add.
 **/
-BLEService              angleService        ("00000001-627e-47e5-a3fc-ddabd97aa966");
-BLEFloatCharacteristic angleCharacteristic  ("00000002-627e-47e5-a3fc-ddabd97aa966", BLERead | BLENotify );
+BLEService             angleService           ("00000001-627E-47E5-A3FC-DDABD97AA966");
+//BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic angleCharacteristic    ("00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic turnRateCharacteristic ("00000003-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
+//BLEFloatCharacteristic slipSkidCharacteristic ("00000004-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify );
 
+BLEStringCharacteristic readingCharacteristic ( "00000002-627E-47E5-A3FC-DDABD97AA966", BLERead | BLENotify , 50);
 
 /*********************************** 
   This is where the work begins. Arduinos have two required functions - setup() and loop(). setup() runs
@@ -255,9 +275,15 @@ void setup() {
       delay(1000);
     }
   }
-
   /** Provided the BLE object begins properly, pop out a message and start setting up our BLE connection **/
   SERIAL.println("BLE Started");
+
+  
+  if (!IMU.begin()) {
+    Serial.println("Failed to initiate IMU!");
+  }
+  SERIAL.println("IMU Started");
+
   
   /** Set name for connection **/
   BLE.setLocalName("DanDerFlieger");  
@@ -275,14 +301,19 @@ void setup() {
   //  messageService.addCharacteristic(messageCharacteristic);
   //  BLE.addService(messageService);
   //  messageCharacteristic.setValue("Connection Established");
-  BLE.setAdvertisedService(angleService);
-  angleService.addCharacteristic(angleCharacteristic);
+  
+  //angleService.addCharacteristic(angleCharacteristic);
+  //angleService.addCharacteristic(turnRateCharacteristic);
+  //angleService.addCharacteristic(slipSkidCharacteristic);
   //angleService.addCharacteristic(messageCharacteristic);
+
+  angleService.addCharacteristic(readingCharacteristic);
+  BLE.setAdvertisedService(angleService);
   BLE.addService(angleService);
 
  /** Start advertising the Bluetooth service(s) **/
   BLE.advertise();  
-  delay(1000); /** give the Bluetooth hardware a second to start up **/
+  delay(1200); /** give the Bluetooth hardware a second to start up **/
   
   /** display that something is happening on the Serial monitor **/
   Serial.print("Peripheral device MAC: "); Serial.println(BLE.address());
@@ -302,8 +333,8 @@ void loop() {
   /** Create a new BLEDevice object (named "central" here) **/
   BLEDevice central = BLE.central();
 
-  /** As long as "central" starts up correctly (basically, is your Android device connected to
-   * the Arduino via Bluetooth?), start doing stuff 
+  /** As long as "central" starts up correctly (basically, is your Android device is connected to
+   * the Arduino via Bluetooth), start doing stuff 
   **/
   if (central) {
 
@@ -313,7 +344,8 @@ void loop() {
     /** light up the LED when a connection is made **/
     digitalWrite(ledPin, HIGH);
     
-    /** 
+    /** Signed vs. Unsigned Longs
+     *  
      * Next, we'll figure out how many milliseconds it's been since the Arduino was powered on using the "millis()" function below
      * and put that value in an "unsigned long" variable. 
      * 
@@ -329,7 +361,7 @@ void loop() {
      * which) is used as the "sign" for positive or negative. So the decimal number -1 would translate into 00000000 00000000 00000000 00000001 in 
      * binary (where the first bit (0) in the list means it's negative number and the other 31 bits are the numeric value). 
      * 
-     * A positive 1 might translate into 10000000 00000000 00000000 00000001, for example - again, where the very first bit (1) denotes a positve number.
+     * A positive 1 might translate into 10000000 00000000 00000000 00000001, for example; this time, where the very first bit (1) denotes a positve number.
      *
      * However:
      * Since we're using an "unsigned" long, the first bit is actually part of an always-positive number rather than being wasted as a -/+ sign 
@@ -357,7 +389,19 @@ void loop() {
 
           SERIAL.print("Beginning Current Pitch Magnitude: ");
           SERIAL.println(ams5600.getMagnitude());
-          
+
+//          float x, y, z;
+//          if(IMU.gyroscopeAvailable()) {
+//            IMU.readGyroscope(x, y, z);
+//            SERIAL.print("Turn Rate: ");
+//            SERIAL.print(x);
+//            SERIAL.print("\t");
+//            SERIAL.print(y);
+//            SERIAL.print("\t");
+//            SERIAL.println(z);
+//            
+//          }
+//          
           /* this kicks the code out of the while loop once the magnet is found */
           break; 
 
@@ -404,6 +448,14 @@ void loop() {
         AoA sensor with the windvane at close to level flight when read at the AS5600).
       */
       float rawAnglePitch = convertRawAngleToDegrees(ams5600.getRawAngle()) - 180;
+      float gX, gY, gZ, aX, aY, aZ;
+      
+      
+      IMU.readGyroscope(gX, gY, gZ);
+      float turnRate = gZ;
+
+      IMU.readAcceleration(aX, aY, aZ);
+      float slipSkid = aY;
 
       /* 
         Check to see if the current value is the same as it was the last time through.
@@ -412,27 +464,74 @@ void loop() {
         instead.
       */
       
-      if (rawAnglePitch != lastAnglePitch) {
+      //if (rawAnglePitch != lastAnglePitch) { // || turnRate != lastTurnRate || slipSkid != lastSlipSkid) {
         /* if so, push the update out over the Bluetooth connection */
-        float blueToothOutput = rawAnglePitch;
+        float pitchAngle = rawAnglePitch;
 
         if (timerMillis - lastMessageTimerMillis < messageSendInterval) {
-          // addNewReadingForAverage(rawAnglePitch);
-          // possibly add code to smooth out data (rounding??) 
+          // Keep tally of the readings and the number of times the code has run
+          // since the last readings were sent. 
+          smoothReadings += pitchAngle;
+          smoothTurnRate += turnRate;
+          smoothSlipSkidReading += slipSkid;
+          smoothReadingsCount++;
+          
         } else {
+
+          // Once we reach our send threshold, average the values using the 
+          // tally for each divided by the number of times the code ran since 
+          // the last message was sent
+          pitchAngle = smoothReadings / smoothReadingsCount;
+          turnRate = smoothTurnRate / smoothReadingsCount;
+          slipSkid = smoothSlipSkidReading / smoothReadingsCount;
+          
           /* reset the last readings with the current ones */
-          lastAnglePitch = rawAnglePitch;
+          lastAnglePitch = pitchAngle;
+          lastTurnRate = turnRate;
+          lastSlipSkid = slipSkid;
+          
 
           /* update the Bluetooth Characteristic - any devices subscribed to the Characteristic
              should see their data updated since we configured it to BLENotify */
-          angleCharacteristic.setValue(blueToothOutput);
+//          SERIAL.print( turnRateCharacteristic  .setValue(turnRate) );
+//          SERIAL.print( angleCharacteristic     .setValue(pitchAngle) );
+//          SERIAL.println( slipSkidCharacteristic  .setValue(slipSkid) );
+
+          String readings = String(pitchAngle) + "," + String(turnRate) + "," + String(slipSkid);
+          SERIAL.println(readings);
+          readingCharacteristic.setValue(readings);
+          //char readingBytes [readings.length()+1];
+          //readings.toCharArray(readingBytes);
+//          readings.toCharArray(readingBytes, readings.length());
+//          readingCharacteristic.setValue(readingBytes);
+
+          //SERIAL.println (readingBytes);
+          
+  
+          //SERIAL.println( readingCharacteristic .setValue(readingCharacteristic));
+
+
+//          String output = String(pitchAngle) + String(",") + String(turnRate) + String(",") + String(slipSkid);
+//
+//          SERIAL.println(output);
+          
   
           /* write the data out to the Serial line to view for debugging. */
-          SERIAL.println(blueToothOutput);
+//          SERIAL.print(pitchAngle);
+//          SERIAL.print(',);
+//          SERIAL.print(turnRate);
+//          SERIAL.print(',');
+//          SERIAL.println(slipSkid);
+
+          // reset the counters in preparation for the next message to be sent
           lastMessageTimerMillis = timerMillis;
+          smoothReadings = 0.0;
+          smoothTurnRate = 0.0;
+          smoothSlipSkidReading = 0.0;
+          smoothReadingsCount = 0;
           
         }
-      }
+      //}
     }
 
     /* 
@@ -463,51 +562,6 @@ void loop() {
   }
 
 }
-
-/*****************************************************************
-  Function: getReadingAverage()
-  In: N/A
-  Out: an average of the last 5 readings
-   calculates the 
-  average of all 5 elements, returns the average value
- *****************************************************************/
-// float getReadingAverage() {
-
-//   float average;
-  
-//   for (int i=0; i<5; i++) {
-//     average += listOfReadings[i];
-//   }
-  
-//   average = average/(int)sizeof(listOfReadings);
-  
-//   return average;
-  
-// }
-
-/*****************************************************************
- Function: addNewReadingForAverage(float newReading)
- In: the latest reading from the AS5600 
- Out: N/A
- Description: Receives a float value, moves all current elements
-  of the listOfReadings float array to the left by one element, 
-  adds the new value to the end of the array,
-******************************************************************/
-// void addNewReadingForAverage(float newReading) {
-//   String output = "listOfReadings{";
-//   for (int i=0; i<4; i++) {
-//     listOfReadings[i] = listOfReadings[i+1];
-//     output += listOfReadings[i];
-//     output += ", ";
-//   }
-  
-//   listOfReadings[4] = newReading;
-//   output += listOfReadings[4];
-//   SERIAL.print(output);SERIAL.println("}");
-//   SERIAL.println(getReadingAverage());
-//   delay(25);
-  
-// }
 
 /********************************************************************
   Function: convertRawAngleToDegrees
@@ -541,7 +595,7 @@ float convertRawAngleToDegrees(word newAngle) {
   you ask for the sensor's reading. The multiplexer will stay connected
   to the device until you ask it to connect to another one of its many 
   device interfaces. From your perspective, though, you only ever call
-  the operator to 
+  the operator to re-route the call
 *********************************************************************/
 void changeMuxPort(uint8_t bus) {
   /* remember that the Multiplexer needs to have its A0 jumper soldered
