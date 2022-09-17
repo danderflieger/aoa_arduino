@@ -159,7 +159,7 @@ unsigned long powerLowBlinkInterval       = 1000; // the amount of time the LED 
  *  possible. I also added a smoothing algorythm below that averages the
  *  readings gathered between the messages that it sends every 150ms.
  */ 
-unsigned long messageSendInterval         = 250; 
+unsigned long messageSendInterval         = 150; 
 
 float smoothReadings = 0.0;
 float smoothTurnRate = 0.0;
