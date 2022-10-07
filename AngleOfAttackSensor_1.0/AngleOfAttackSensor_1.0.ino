@@ -1,4 +1,4 @@
-/*********** Licensing, Information and Warnings - READ THIS PLEASE ****************
+                        /*********** Licensing, Information and Warnings - READ THIS PLEASE ****************
 
   AngleOfAttackSensor_1.0
   Author: Dan DeFord
@@ -116,6 +116,7 @@
 #include <Wire.h>       // library required for I2C communications
 #include <AS5600.h>     // library for the AS5600 magnetic rotational encoder
 #include <Arduino_LSM6DS3.h>
+//#include <Arduino_LSM6DSOX.h>
 
 
 /** 
