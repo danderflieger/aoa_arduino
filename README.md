@@ -1,5 +1,10 @@
 # Angle of Attack Sensor Code Base (Arduino)
-This repository is for the Angle of Attack Sensor, which runs on an Arduino Nano 33 IOT or an Arduino Nano 33 BLE board. This code is posted here for those with a desire to modify or customize it for their own use. If you know what to do with it, you probably understand how to create your own git branch and update it however you wish. It's open source, so feel free to improve it for your own use. Regardless of whether you use my code directly or change it for your own purposes, you do so at your own risk and at the risk of your passengers. You, as pilot in command, have ultimate reponsibility for the safe outcome of every flight. 
+This repository is for the Angle of Attack Sensor, which runs on 
+- an Arduino Nano 33 IOT 
+- an Arduino Nano 33 BLE board 
+- (this is new) an Arduino RP2040 Connect board. 
+
+This code is posted here for those with a desire to modify or customize it for their own use. If you know what to do with it, you probably understand how to create your own git branch and update it however you wish. It's open source, so feel free to improve it for your own use. Regardless of whether you use my code directly or change it for your own purposes, you do so at your own risk and at the risk of your passengers. You, as pilot in command, have ultimate reponsibility for the safe outcome of every flight. 
 
 If you find an issue with the code (or simply have a better way to do something), feel free to create an issue and add a lot of details. I may or may not do something about it. 
 
