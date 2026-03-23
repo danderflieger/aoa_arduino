@@ -115,8 +115,19 @@
 #include <ArduinoBLE.h> // library for utilizing Bluetooth Low Energy 
 #include <Wire.h>       // library required for I2C communications
 #include <AS5600.h>     // library for the AS5600 magnetic rotational encoder
-#include <Arduino_LSM6DS3.h>
-//#include <Arduino_LSM6DSOX.h>
+// #include <Arduino_LSM6DS3.h>      // library for the accelerometer/gyro in the Nano 33 IoT
+// #include <Arduino_LSM6DSOX.h>   // library for the accelerometer/gyro in the Nano RP2040 Connect
+
+// The three Arduino Nano variants use different Inertial Measurement Units (IMUs). Depending on which 
+// board is used, this section will select the correct library for acclerometer/gyro hardware for the
+// turn coordinator feature. 
+#if defined(ARDUINO_NANO_RP2040_CONNECT)
+  #include <Arduino_LSM6DSOX.h> 
+#elif defined(ARDUINO_SAMD_NANO_33_IOT)
+  #include <Arduino_LSM6DS3.h>
+#elif defined(ARDUINO_ARDUINO_NANO33BLE)
+  #include <Arduino_LSM9DS1.h>
+#endif
 
 
 /** 
@@ -238,6 +249,31 @@ void setup() {
    * for lines that say SERIAL.println() - data within the paretheses will show up in the Serial monitor)
    *********************************/
   SERIAL.begin(115200);
+
+
+  // if (!BLE.begin()) {
+    
+  //   /*** While loops ***
+  //    * The small code block below is what we call a while loop. It will run while whatever is in 
+  //    * the parentheses is true. In this case, it's a little confusing. What we're doing is telling 
+  //    * our code to stop here and toss an error out to the Serial monitor over and over every second
+  //    * because, for some reason (probably a hardware issue) the BLE object didn't "begin" 
+  //    * If the BLE object DOES start, this while loop will never run.
+  //   *******************/
+  //   while (1) {
+  //     SERIAL.println("BLE Start Failed!");
+  //     delay(1000);
+  //   }
+  // }
+
+  int retryCount = 0;
+  while (!BLE.begin() && retryCount < 10) {
+    SERIAL.println("BLE Start Failed! Retrying...");
+    delay(1000);
+    retryCount++;
+  }  
+  /** Provided the BLE object begins properly, pop out a message and start setting up our BLE connection **/
+  SERIAL.println("BLE Started");
   
 
   /***** LED Light Control ************
@@ -262,22 +298,7 @@ void setup() {
     * true, do something. In this case, we're say that if the BLE object does NOT "begin", run 
     * the code between the brackets { }
   *******************************************/
-  if (!BLE.begin()) {
-    
-    /*** While loops ***
-     * The small code block below is what we call a while loop. It will run while whatever is in 
-     * the parentheses is true. In this case, it's a little confusing. What we're doing is telling 
-     * our code to stop here and toss an error out to the Serial monitor over and over every second
-     * because, for some reason (probably a hardware issue) the BLE object didn't "begin" 
-     * If the BLE object DOES start, this while loop will never run.
-    *******************/
-    while (1) {
-      SERIAL.println("BLE Start Failed!");
-      delay(1000);
-    }
-  }
-  /** Provided the BLE object begins properly, pop out a message and start setting up our BLE connection **/
-  SERIAL.println("BLE Started");
+  
 
   
   if (!IMU.begin()) {
@@ -294,7 +315,7 @@ void setup() {
   byte manufName[3] = { 0x44, 0x44, 0x72 };
   
   /** Setting the Manuf. Name using the byte array above, and telling our code that it's 13 bytes long **/
-  BLE.setManufacturerData(manufName, 13); 
+  BLE.setManufacturerData(manufName, 3); 
 
 
   /** Add the Bluetooth Service and Characteristic defined above **/
